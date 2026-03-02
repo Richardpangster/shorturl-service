@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ShortURL Service - 短链接服务</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <!-- QRCode.js CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"
+          integrity="sha512-CNgIRecGo7nphbeZ04Sc13ka07paqdeTu0WR1IM4kNcpmBAUSHSe2keGSWWRn8p/U+/8J15hCVTa5pf6ZJXFQ=="
+          crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+</head>
+<body>
+  <div class="app-wrapper">
+    <!-- Header -->
+    <header class="site-header">
+      <div class="header-inner">
+        <div class="logo">
+          <span class="logo-icon">🔗</span>
+          <span class="logo-text">ShortURL</span>
+        </div>
+        <p class="tagline">快速生成短链接，简洁高效</p>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <!-- Shorten Card -->
+      <section class="card" id="shorten-card">
+        <h2 class="card-title">生成短链接</h2>
+
+        <form id="shorten-form" novalidate>
+          <!-- URL Input -->
+          <div class="form-group">
+            <label class="form-label" for="url-input">长链接</label>
+            <input
+              type="url"
+              id="url-input"
+              class="form-input"
+              placeholder="https://example.com/your/very/long/url"
+              required
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </div>
+
+          <!-- Expiry Selector -->
+          <div class="form-group">
+            <label class="form-label" for="expire-select">过期时间</label>
+            <div class="expire-options">
+              <label class="expire-option">
+                <input type="radio" name="expire_days" value="7" />
+                <span class="expire-btn">7天</span>
+              </label>
+              <label class="expire-option">
+                <input type="radio" name="expire_days" value="30" checked />
+                <span class="expire-btn active">30天</span>
+              </label>
+              <label class="expire-option">
+                <input type="radio" name="expire_days" value="90" />
+                <span class="expire-btn">90天</span>
+              </label>
+            </div>
+          </div>
+
+          <button type="submit" class="btn btn-primary" id="submit-btn">
+            <span class="btn-text">生成短链</span>
+            <span class="btn-loading hidden">处理中…</span>
+          </button>
+        </form>
+
+        <!-- Error Message -->
+        <div id="error-msg" class="alert alert-error hidden" role="alert"></div>
+
+        <!-- Result Section -->
+        <div id="result-section" class="result-section hidden">
+          <div class="result-header">
+            <span class="result-icon">✅</span>
+            <span class="result-title">短链接已生成</span>
+          </div>
+
+          <div class="result-body">
+            <!-- Short URL -->
+            <div class="result-url-row">
+              <a id="short-link" href="#" target="_blank" rel="noopener noreferrer" class="short-url"></a>
+              <button class="btn btn-copy" id="copy-btn" title="复制短链接">
+                <span>📋 复制</span>
+              </button>
+            </div>
+
+            <!-- Meta Info -->
+            <div class="result-meta">
+              <span class="meta-item">
+                <span class="meta-label">原始链接：</span>
+                <span id="original-url" class="meta-value truncate"></span>
+              </span>
+              <span class="meta-item">
+                <span class="meta-label">过期时间：</span>
+                <span id="expires-at" class="meta-value"></span>
+              </span>
+            </div>
+
+            <!-- QR Code -->
+            <div class="qr-section">
+              <p class="qr-label">扫码访问</p>
+              <div id="qrcode" class="qrcode-box"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Stats Card -->
+      <section class="card" id="stats-card">
+        <h2 class="card-title">查询统计</h2>
+        <p class="card-desc">输入短码查看访问统计</p>
+
+        <form id="stats-form" novalidate>
+          <div class="form-group stats-row">
+            <input
+              type="text"
+              id="stats-input"
+              class="form-input"
+              placeholder="输入短码，例如：aB3xY9"
+              maxlength="20"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <button type="submit" class="btn btn-secondary">查询</button>
+          </div>
+        </form>
+
+        <!-- Stats Error -->
+        <div id="stats-error" class="alert alert-error hidden" role="alert"></div>
+
+        <!-- Stats Result -->
+        <div id="stats-result" class="stats-result hidden">
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-value" id="stat-visits">—</div>
+              <div class="stat-label">总访问次数</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value" id="stat-code">—</div>
+              <div class="stat-label">短码</div>
+            </div>
+          </div>
+          <div class="stats-detail">
+            <div class="detail-row">
+              <span class="detail-label">原始链接</span>
+              <a id="stat-original" href="#" target="_blank" rel="noopener noreferrer" class="detail-value link-overflow"></a>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">创建时间</span>
+              <span id="stat-created" class="detail-value"></span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">过期时间</span>
+              <span id="stat-expires" class="detail-value"></span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">最后访问</span>
+              <span id="stat-last-visit" class="detail-value"></span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="site-footer">
+      <p>ShortURL Service &copy; 2025 &middot; Powered by FastAPI + Redis</p>
+    </footer>
+  </div>
+
+  <script>
+    // ─── Utilities ────────────────────────────────────────────────────────────
+
+    /**
+     * Format an ISO date string to locale-friendly display.
+     * @param {string} isoStr
+     * @returns {string}
+     */
+    function formatDate(isoStr) {
+      if (!isoStr) return '—';
+      try {
+        return new Date(isoStr).toLocaleString('zh-CN', {
+          year: 'numeric', month: '2-digit', day: '2-digit',
+          hour: '2-digit', minute: '2-digit',
+        });
+      } catch (e) {
+        return isoStr;
+      }
+    }
+
+    /**
+     * Show an alert element with the given message.
+     * @param {HTMLElement} el
+     * @param {string} msg
+     */
+    function showAlert(el, msg) {
+      el.textContent = msg;
+      el.classList.remove('hidden');
+    }
+
+    function hideAlert(el) {
+      el.classList.add('hidden');
+      el.textContent = '';
+    }
+
+    // ─── Expire Option Radio Styling ─────────────────────────────────────────
+    document.querySelectorAll('input[name="expire_days"]').forEach(radio => {
+      radio.addEventListener('change', () => {
+        document.querySelectorAll('.expire-btn').forEach(btn => btn.classList.remove('active'));
+        radio.nextElementSibling.classList.add('active');
+      });
+    });
+
+    // ─── QR Code Generator ───────────────────────────────────────────────────
+    let qrInstance = null;
+
+    /**
+     * Generate (or refresh) QR code for the given URL.
+     * @param {string} url
+     */
+    function generateQR(url) {
+      const container = document.getElementById('qrcode');
+      container.innerHTML = '';
+      qrInstance = new QRCode(container, {
+        text: url,
+        width: 160,
+        height: 160,
+        colorDark: '#1a1a2e',
+        colorLight: '#ffffff',
+        correctLevel: QRCode.CorrectLevel.M,
+      });
+    }
+
+    // ─── Copy Button ─────────────────────────────────────────────────────────
+    document.getElementById('copy-btn').addEventListener('click', async () => {
+      const link = document.getElementById('short-link').href;
+      try {
+        await navigator.clipboard.writeText(link);
+        const btn = document.getElementById('copy-btn');
+        btn.innerHTML = '<span>✅ 已复制</span>';
+        setTimeout(() => { btn.innerHTML = '<span>📋 复制</span>'; }, 2000);
+      } catch (e) {
+        // Fallback
+        const ta = document.createElement('textarea');
+        ta.value = link;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+    });
+
+    // ─── Shorten Form ────────────────────────────────────────────────────────
+    document.getElementById('shorten-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const urlInput = document.getElementById('url-input');
+      const errorEl = document.getElementById('error-msg');
+      const resultSection = document.getElementById('result-section');
+      const submitBtn = document.getElementById('submit-btn');
+      const btnText = submitBtn.querySelector('.btn-text');
+      const btnLoading = submitBtn.querySelector('.btn-loading');
+
+      hideAlert(errorEl);
+      resultSection.classList.add('hidden');
+
+      // Get selected expire_days
+      const expireRadio = document.querySelector('input[name="expire_days"]:checked');
+      const expireDays = expireRadio ? parseInt(expireRadio.value, 10) : 30;
+
+      // Loading state
+      btnText.classList.add('hidden');
+      btnLoading.classList.remove('hidden');
+      submitBtn.disabled = true;
+
+      try {
+        const res = await fetch('/api/shorten', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: urlInput.value, expire_days: expireDays }),
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          showAlert(errorEl, data.detail || '请求失败，请稍后重试。');
+          return;
+        }
+
+        // Populate result
+        const shortLinkEl = document.getElementById('short-link');
+        shortLinkEl.href = data.short_url;
+        shortLinkEl.textContent = data.short_url;
+
+        const originalEl = document.getElementById('original-url');
+        originalEl.textContent = data.original_url;
+        originalEl.title = data.original_url;
+
+        document.getElementById('expires-at').textContent = formatDate(data.expires_at);
+
+        resultSection.classList.remove('hidden');
+
+        // Generate QR code after element is visible
+        generateQR(data.short_url);
+
+        // Scroll result into view smoothly
+        resultSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+      } catch (err) {
+        showAlert(errorEl, '网络错误，请检查连接后重试。');
+      } finally {
+        btnText.classList.remove('hidden');
+        btnLoading.classList.add('hidden');
+        submitBtn.disabled = false;
+      }
+    });
+
+    // ─── Stats Form ──────────────────────────────────────────────────────────
+    document.getElementById('stats-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const input = document.getElementById('stats-input');
+      const errorEl = document.getElementById('stats-error');
+      const resultEl = document.getElementById('stats-result');
+
+      hideAlert(errorEl);
+      resultEl.classList.add('hidden');
+
+      const shortCode = input.value.trim();
+      if (!shortCode) {
+        showAlert(errorEl, '请输入短码。');
+        return;
+      }
+
+      try {
+        const res = await fetch(`/api/stats/${encodeURIComponent(shortCode)}`);
+        const data = await res.json();
+
+        if (!res.ok) {
+          showAlert(errorEl, data.detail || '未找到该短码。');
+          return;
+        }
+
+        document.getElementById('stat-visits').textContent = data.visit_count.toLocaleString();
+        document.getElementById('stat-code').textContent = data.short_code;
+
+        const origLink = document.getElementById('stat-original');
+        origLink.href = data.original_url;
+        origLink.textContent = data.original_url;
+        origLink.title = data.original_url;
+
+        document.getElementById('stat-created').textContent = formatDate(data.created_at);
+        document.getElementById('stat-expires').textContent = formatDate(data.expires_at);
+        document.getElementById('stat-last-visit').textContent =
+          data.last_visited_at ? formatDate(data.last_visited_at) : '尚未访问';
+
+        resultEl.classList.remove('hidden');
+        resultEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+      } catch (err) {
+        showAlert(errorEl, '网络错误，请检查连接后重试。');
+      }
+    });
+  </script>
+</body>
+</html>

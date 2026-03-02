@@ -1,0 +1,46 @@
+services:
+  # ─── FastAPI Application ────────────────────────────────────────────────────
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shorturl_web
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: "sqlite+aiosqlite:////data/shorturl.db"
+      REDIS_URL: "redis://redis:6379/0"
+      BASE_URL: "${BASE_URL:-http://localhost:8000}"
+      DEFAULT_EXPIRE_DAYS: "${DEFAULT_EXPIRE_DAYS:-30}"
+    volumes:
+      # Persist SQLite database outside the container
+      - shorturl_data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ─── Redis Cache ────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: shorturl_redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb",
+              "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  shorturl_data:
+    driver: local

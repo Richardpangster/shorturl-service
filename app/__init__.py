@@ -1,0 +1,1 @@
+"""ShortURL Service application package."""

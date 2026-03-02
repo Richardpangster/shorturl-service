@@ -5,10 +5,30 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ShortURL Service - 短链接服务</title>
   <link rel="stylesheet" href="/static/style.css" />
-  <!-- QRCode.js CDN -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"
-          integrity="sha512-CNgIRecGo7nphbeZ04Sc13ka07paqdeTu0WR1IM4kNcpmBAUSHSe2keGSWWRn8p/U+/8J15hCVTa5pf6ZJXFQ=="
-          crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <!-- QRCode.js CDN with fallback sources -->
+  <script>
+    (function() {
+      var cdnUrls = [
+        "https://unpkg.com/qrcodejs@1.0.0/qrcode.min.js",
+        "https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js",
+        "https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"
+      ];
+      function loadScript(url, cb) {
+        var s = document.createElement("script");
+        s.src = url;
+        s.onload = function() { window.QRCODE_LOADED = true; if(cb) cb(null); };
+        s.onerror = function() { if(cb) cb(new Error("failed")); };
+        document.head.appendChild(s);
+      }
+      function tryLoad(i) {
+        if (i >= cdnUrls.length) { window.QRCODE_LOADED = false; return; }
+        loadScript(cdnUrls[i], function(err) {
+          if (err) tryLoad(i + 1);
+        });
+      }
+      tryLoad(0);
+    })();
+  </script>
 </head>
 <body>
   <div class="app-wrapper">
@@ -223,16 +243,26 @@
      * @param {string} url
      */
     function generateQR(url) {
-      const container = document.getElementById('qrcode');
-      container.innerHTML = '';
-      qrInstance = new QRCode(container, {
-        text: url,
-        width: 160,
-        height: 160,
-        colorDark: '#1a1a2e',
-        colorLight: '#ffffff',
-        correctLevel: QRCode.CorrectLevel.M,
-      });
+      setTimeout(function() {
+        var container = document.getElementById('qrcode');
+        container.innerHTML = '';
+        if (typeof QRCode === 'undefined') {
+          container.innerHTML = '<p style="color:#999;font-size:12px;text-align:center">二维码加载失败，请使用链接访问</p>';
+          return;
+        }
+        try {
+          qrInstance = new QRCode(container, {
+            text: url,
+            width: 160,
+            height: 160,
+            colorDark: '#1a1a2e',
+            colorLight: '#ffffff',
+            correctLevel: QRCode.CorrectLevel.M,
+          });
+        } catch(e) {
+          container.innerHTML = '<p style="color:#999;font-size:12px;text-align:center">二维码生成失败</p>';
+        }
+      }, 200);
     }
 
     // ─── Copy Button ─────────────────────────────────────────────────────────

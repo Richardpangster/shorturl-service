@@ -1,15 +1,18 @@
 """Business logic layer for ShortURL Service.
 
 Handles short code generation, URL creation, redirect resolution,
-statistics retrieval, and expiry enforcement.
+statistics retrieval, expiry enforcement, and cleanup utilities.
 """
 
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 from app.cache import cache_delete, cache_get, cache_set
 from app.config import settings
@@ -205,3 +208,25 @@ async def delete_short_url(db: AsyncSession, short_code: str) -> bool:
     await db.delete(url_record)
     await cache_delete(short_code)
     return True
+
+
+async def cleanup_expired_urls(db: AsyncSession) -> int:
+    """Delete all expired short URL records from the database.
+
+    This should be called on startup or as a periodic maintenance task.
+    Expired records are those where ``expires_at`` is in the past.
+
+    Args:
+        db: Async SQLAlchemy session.
+
+    Returns:
+        The number of records deleted.
+    """
+    now = _utcnow()
+    result = await db.execute(
+        delete(URL).where(URL.expires_at < now)
+    )
+    deleted_count: int = result.rowcount  # type: ignore[assignment]
+    if deleted_count:
+        logger.info("Cleaned up %d expired URL record(s).", deleted_count)
+    return deleted_count

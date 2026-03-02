@@ -1,5 +1,6 @@
 """FastAPI application entry point for ShortURL Service."""
 
+import logging
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -7,16 +8,40 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from app.cache import close_redis
-from app.database import init_db
+from app.database import AsyncSessionLocal, init_db
 from app.routers import api, pages, redirect
+from app.services import cleanup_expired_urls
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Manage application startup and shutdown lifecycle."""
+    """Manage application startup and shutdown lifecycle.
+
+    On startup:
+        - Initialises database tables.
+        - Cleans up any expired short URL records.
+
+    On shutdown:
+        - Closes Redis connection pool.
+    """
     # Startup
     await init_db()
+
+    # Clean up expired records on boot
+    async with AsyncSessionLocal() as session:
+        try:
+            count = await cleanup_expired_urls(session)
+            await session.commit()
+            if count:
+                logger.info("Startup cleanup removed %d expired URL(s).", count)
+        except Exception as exc:  # pragma: no cover
+            logger.warning("Startup cleanup failed: %s", exc)
+            await session.rollback()
+
     yield
+
     # Shutdown
     await close_redis()
 

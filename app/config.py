@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     default_expire_days: int = 30
     short_code_length: int = 6
     short_code_max_retries: int = 5
+    cleanup_interval_hours: int = 1
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

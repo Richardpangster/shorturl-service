@@ -251,3 +251,42 @@ async def cleanup_expired_urls(db: AsyncSession) -> int:
     if deleted_count:
         logger.info("Cleaned up %d expired URL record(s).", deleted_count)
     return deleted_count
+
+
+async def cleanup_expired_urls_with_cache(db: AsyncSession) -> int:
+    """Delete all expired short URL records and evict their Redis cache entries.
+
+    Fetches the short codes of expired records first so they can be removed
+    from Redis, then bulk-deletes the rows from the database.
+
+    Args:
+        db: Async SQLAlchemy session.
+
+    Returns:
+        The number of records deleted.
+    """
+    now = _utcnow()
+
+    # Fetch short codes of expired records so we can evict them from Redis.
+    result = await db.execute(
+        select(URL.short_code).where(URL.expires_at < now)
+    )
+    expired_codes: list[str] = list(result.scalars().all())
+
+    if not expired_codes:
+        return 0
+
+    # Bulk delete expired rows.
+    del_result = await db.execute(
+        delete(URL).where(URL.short_code.in_(expired_codes))
+    )
+    deleted_count: int = del_result.rowcount  # type: ignore[assignment]
+
+    # Evict Redis cache entries for deleted codes.
+    for code in expired_codes:
+        await cache_delete(code)
+
+    if deleted_count:
+        logger.info("Cleaned up %d expired URL(s).", deleted_count)
+
+    return deleted_count

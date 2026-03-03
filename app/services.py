@@ -7,7 +7,7 @@ statistics retrieval, expiry enforcement, and cleanup utilities.
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
@@ -123,10 +123,13 @@ async def resolve_short_code(
     db: AsyncSession,
     short_code: str,
 ) -> Optional[str]:
-    """Resolve a short code to its original URL, updating visit statistics.
+    """Resolve a short code to its original URL.
 
     Checks the Redis cache first; falls back to the database on a cache miss.
     Returns ``None`` if the short code does not exist or has expired.
+
+    Note: Visit statistics are NOT updated here. Callers should invoke
+    ``update_visit_stats`` as a background task after returning the response.
 
     Args:
         db:         Async SQLAlchemy session.
@@ -140,8 +143,6 @@ async def resolve_short_code(
     if cached == _CACHE_MISS_SENTINEL:
         return None
     if cached is not None:
-        # Still update visit stats asynchronously via DB (best-effort).
-        await _increment_visit(db, short_code)
         return cached
 
     # 2. Cache miss — query DB.
@@ -160,10 +161,9 @@ async def resolve_short_code(
         await cache_set(short_code, _CACHE_MISS_SENTINEL, ttl=60)
         return None
 
-    # 4. Warm cache and update stats.
+    # 4. Warm cache.
     ttl = int((url_record.expires_at.replace(tzinfo=timezone.utc) - _utcnow()).total_seconds())
     await cache_set(short_code, url_record.original_url, ttl=max(ttl, 1))
-    await _increment_visit(db, short_code)
 
     return url_record.original_url
 
@@ -180,6 +180,35 @@ async def _increment_visit(db: AsyncSession, short_code: str) -> None:
         .where(URL.short_code == short_code)
         .values(visit_count=URL.visit_count + 1, last_visited_at=_utcnow())
     )
+
+
+async def update_visit_stats(
+    short_code: str,
+    session_factory: Optional[Any] = None,
+) -> None:
+    """Update visit statistics for a short code using an independent DB session.
+
+    Intended to be called as a FastAPI BackgroundTask so the redirect response
+    is returned to the client immediately without waiting for the DB write.
+
+    Uses its own session (not the request session) to avoid session-closed
+    conflicts after the response has been sent.
+
+    Args:
+        short_code:      The short code whose statistics should be incremented.
+        session_factory: Optional async session factory to use instead of the
+                         default ``AsyncSessionLocal``. Useful for testing.
+    """
+    from app.database import AsyncSessionLocal
+
+    factory = session_factory or AsyncSessionLocal
+    async with factory() as session:
+        try:
+            await _increment_visit(session, short_code)
+            await session.commit()
+        except Exception as exc:  # pragma: no cover
+            logger.warning("Background visit stats update failed for %r: %s", short_code, exc)
+            await session.rollback()
 
 
 async def get_url_stats(

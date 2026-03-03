@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.cache import close_redis
 from app.database import AsyncSessionLocal, init_db
-from app.routers import api, pages, redirect
+from app.routers import api, auth, pages, redirect
 from app.services import cleanup_expired_urls
 
 logger = logging.getLogger(__name__)
@@ -59,4 +59,5 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # Routers — order matters: API and pages must come before the catch-all redirect.
 app.include_router(pages.router)
 app.include_router(api.router)
+app.include_router(auth.router)
 app.include_router(redirect.router)

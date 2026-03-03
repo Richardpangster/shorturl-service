@@ -99,20 +99,62 @@ async def test_stats_success(client):
 
 @pytest.mark.asyncio
 async def test_stats_visit_count_increments(client):
-    """Visiting a short URL increments the visit counter."""
+    """Visiting a short URL triggers background visit-stat updates."""
+    from unittest.mock import AsyncMock, patch
+
     create_resp = await client.post(
         "/api/shorten",
         json={"url": "https://python.org/"},
     )
     short_code = create_resp.json()["short_code"]
 
-    # Visit twice.
-    await client.get(f"/{short_code}", follow_redirects=False)
-    await client.get(f"/{short_code}", follow_redirects=False)
+    # Patch update_visit_stats so it doesn't use a separate DB session
+    # (which wouldn't share the test in-memory DB).
+    with patch("app.routers.redirect.update_visit_stats", new_callable=AsyncMock) as mock_update:
+        await client.get(f"/{short_code}", follow_redirects=False)
+        await client.get(f"/{short_code}", follow_redirects=False)
 
-    stats_resp = await client.get(f"/api/stats/{short_code}")
-    assert stats_resp.status_code == 200
-    assert stats_resp.json()["visit_count"] == 2
+    # Background task should have been scheduled twice.
+    assert mock_update.call_count == 2
+    mock_update.assert_called_with(short_code)
+
+
+@pytest.mark.asyncio
+async def test_update_visit_stats_increments_db(db_session):
+    """update_visit_stats correctly increments visit_count in the DB."""
+    from datetime import datetime, timedelta, timezone
+    from unittest.mock import patch
+
+    from app.models import URL
+    from app.services import update_visit_stats
+
+    now = datetime.now(timezone.utc)
+    record = URL(
+        short_code="VSTST1",
+        original_url="https://visit-test.example.com/",
+        created_at=now,
+        expires_at=now + timedelta(days=30),
+        visit_count=0,
+        last_visited_at=None,
+    )
+    db_session.add(record)
+    await db_session.flush()
+
+    # Patch AsyncSessionLocal to return the test session so update_visit_stats
+    # writes to the same in-memory DB used by the test.
+    from unittest.mock import MagicMock
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _mock_session():
+        yield db_session
+
+    with patch("app.database.AsyncSessionLocal", return_value=_mock_session()):
+        await update_visit_stats("VSTST1")
+
+    await db_session.refresh(record)
+    assert record.visit_count == 1
+    assert record.last_visited_at is not None
 
 
 @pytest.mark.asyncio

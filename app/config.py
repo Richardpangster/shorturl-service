@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     base_url: str = "http://localhost:8000"
     default_expire_days: int = 30
     short_code_length: int = 6
+    short_code_max_retries: int = 5
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

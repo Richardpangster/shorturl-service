@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import delete, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -20,6 +21,12 @@ from app.models import URL
 
 # Sentinel cache value that indicates a short code does NOT exist / is expired.
 _CACHE_MISS_SENTINEL = "__NOT_FOUND__"
+
+
+class ShortCodeGenerationError(RuntimeError):
+    """Raised when a unique short code cannot be generated after max retries."""
+
+    pass
 
 
 def _utcnow() -> datetime:
@@ -49,8 +56,10 @@ async def create_short_url(
 ) -> URL:
     """Create a new short URL record in the database.
 
-    Generates a unique 6-character short code, retrying on collision.
-    Caches the mapping in Redis after successful insert.
+    Generates a unique short code, retrying on collision up to
+    ``settings.short_code_max_retries`` times.  Uses ``IntegrityError``
+    as the collision signal so there is no TOCTOU race between the
+    existence check and the insert.
 
     Args:
         db:           Async SQLAlchemy session.
@@ -59,6 +68,10 @@ async def create_short_url(
 
     Returns:
         The newly created :class:`URL` ORM instance.
+
+    Raises:
+        ShortCodeGenerationError: If a unique code cannot be produced within
+            ``settings.short_code_max_retries`` attempts.
     """
     if expire_days is None:
         expire_days = settings.default_expire_days
@@ -66,36 +79,44 @@ async def create_short_url(
     now = _utcnow()
     expires_at = now + timedelta(days=expire_days)
 
-    # Retry loop — collision probability is extremely low but handle it anyway.
-    for _ in range(10):
+    last_exc: Optional[IntegrityError] = None
+    for attempt in range(settings.short_code_max_retries + 1):  # +1: first attempt + N retries
         short_code = _generate_short_code()
 
-        # Check uniqueness in DB.
-        existing = await db.execute(
-            select(URL).where(URL.short_code == short_code)
+        url_record = URL(
+            short_code=short_code,
+            original_url=original_url,
+            created_at=now,
+            expires_at=expires_at,
+            visit_count=0,
+            last_visited_at=None,
         )
-        if existing.scalar_one_or_none() is None:
-            break
-    else:
-        raise RuntimeError("Failed to generate a unique short code after 10 attempts.")
+        db.add(url_record)
 
-    url_record = URL(
-        short_code=short_code,
-        original_url=original_url,
-        created_at=now,
-        expires_at=expires_at,
-        visit_count=0,
-        last_visited_at=None,
-    )
-    db.add(url_record)
-    await db.flush()  # get the id without committing
-    await db.refresh(url_record)
+        try:
+            await db.flush()  # get the id; raises IntegrityError on collision
+            await db.refresh(url_record)
+        except IntegrityError as exc:
+            last_exc = exc
+            await db.rollback()
+            logger.warning(
+                "Short code collision on attempt %d/%d (code=%r): %s",
+                attempt + 1,
+                settings.short_code_max_retries,
+                short_code,
+                exc,
+            )
+            continue
 
-    # Cache mapping: short_code -> original_url
-    ttl = int((expires_at - now).total_seconds())
-    await cache_set(short_code, original_url, ttl=max(ttl, 1))
+        # Success — warm the cache and return.
+        ttl = int((expires_at - now).total_seconds())
+        await cache_set(short_code, original_url, ttl=max(ttl, 1))
+        return url_record
 
-    return url_record
+    raise ShortCodeGenerationError(
+        f"Failed to generate a unique short code after "
+        f"{settings.short_code_max_retries} attempts."
+    ) from last_exc
 
 
 async def resolve_short_code(

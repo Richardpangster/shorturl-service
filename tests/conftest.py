@@ -47,8 +47,21 @@ async def client():
 
     app.dependency_overrides[get_db] = override_get_db
 
+    # Patch update_visit_stats in the redirect router module so that
+    # background visit stat updates go to the in-memory test database.
+    import app.routers.redirect as redirect_module
+    import app.services as svc_module
+
+    original_update = redirect_module.update_visit_stats
+
+    async def patched_update_visit_stats(short_code: str, session_factory=None) -> None:
+        await svc_module.update_visit_stats(short_code, session_factory=TestSessionLocal)
+
+    redirect_module.update_visit_stats = patched_update_visit_stats
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
 
+    redirect_module.update_visit_stats = original_update
     app.dependency_overrides.clear()

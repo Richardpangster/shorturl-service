@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
-from app.services import create_short_url, get_url_stats
+from app.services import ShortCodeGenerationError, create_short_url, get_url_stats
 
 router = APIRouter(prefix="/api", tags=["api"])
 
@@ -66,11 +66,18 @@ async def shorten_url(
     - **url**: The original long URL to shorten.
     - **expire_days**: Optional expiry in days (default 30).
     """
-    url_record = await create_short_url(
-        db=db,
-        original_url=str(body.url),
-        expire_days=body.expire_days,
-    )
+    try:
+        url_record = await create_short_url(
+            db=db,
+            original_url=str(body.url),
+            expire_days=body.expire_days,
+        )
+    except ShortCodeGenerationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
+
     short_url = f"{settings.base_url}/{url_record.short_code}"
     expires_at_aware = url_record.expires_at.replace(tzinfo=timezone.utc)
     return ShortenResponse(

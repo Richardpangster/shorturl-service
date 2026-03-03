@@ -157,3 +157,77 @@ async def test_homepage_returns_html(client):
     resp = await client.get("/")
     assert resp.status_code == 200
     assert "text/html" in resp.headers["content-type"]
+
+
+# ---------------------------------------------------------------------------
+# Short code collision protection (Issue #8)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_collision_retry_succeeds(client, monkeypatch):
+    """Short code generation retries on collision and eventually succeeds."""
+    from unittest.mock import patch
+
+    call_count = 0
+    original_codes = ["AAAAA1", "AAAAA1", "AAAAA1", "BBBBBB"]  # first 3 collide
+
+    def _mock_generate() -> str:
+        nonlocal call_count
+        code = original_codes[min(call_count, len(original_codes) - 1)]
+        call_count += 1
+        return code
+
+    # Create a URL that occupies code "AAAAA1" in the DB first.
+    with patch("app.services._generate_short_code", side_effect=lambda: "AAAAA1"):
+        resp1 = await client.post(
+            "/api/shorten",
+            json={"url": "https://first.example.com/"},
+        )
+    assert resp1.status_code == 201
+    assert resp1.json()["short_code"] == "AAAAA1"
+
+    # Now try to create another URL; the mock makes it collide 3 times before
+    # producing a unique code "BBBBBB".
+    with patch("app.services._generate_short_code", side_effect=_mock_generate):
+        resp2 = await client.post(
+            "/api/shorten",
+            json={"url": "https://second.example.com/"},
+        )
+    assert resp2.status_code == 201
+    assert resp2.json()["short_code"] == "BBBBBB"
+    assert call_count >= 4  # at least 3 collisions + 1 success
+
+
+@pytest.mark.asyncio
+async def test_collision_exhausted_returns_500(client):
+    """Exceeding SHORT_CODE_MAX_RETRIES returns 500 with a meaningful error."""
+    from unittest.mock import patch
+
+    from app import config as cfg_module
+
+    # Override max retries to 2 so the test runs fast.
+    original_retries = cfg_module.settings.short_code_max_retries
+    cfg_module.settings.short_code_max_retries = 2
+
+    try:
+        # Pre-occupy the only code the mock will ever generate.
+        with patch("app.services._generate_short_code", return_value="ZZZZZZ"):
+            resp1 = await client.post(
+                "/api/shorten",
+                json={"url": "https://occupied.example.com/"},
+            )
+        assert resp1.status_code == 201
+
+        # Now every attempt collides → should exhaust retries → 500.
+        with patch("app.services._generate_short_code", return_value="ZZZZZZ"):
+            resp2 = await client.post(
+                "/api/shorten",
+                json={"url": "https://another.example.com/"},
+            )
+        assert resp2.status_code == 500
+        body = resp2.json()
+        # The error response should carry a meaningful message.
+        assert "detail" in body or "message" in body or "error" in body
+    finally:
+        cfg_module.settings.short_code_max_retries = original_retries

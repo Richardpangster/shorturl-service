@@ -80,7 +80,7 @@ async def create_short_url(
     expires_at = now + timedelta(days=expire_days)
 
     last_exc: Optional[IntegrityError] = None
-    for attempt in range(settings.short_code_max_retries):
+    for attempt in range(settings.short_code_max_retries + 1):  # +1: first attempt + N retries
         short_code = _generate_short_code()
 
         url_record = URL(
